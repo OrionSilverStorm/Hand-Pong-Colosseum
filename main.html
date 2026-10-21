@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="WIDTH=device-WIDTH, initial-scale=1.0" />
+    <title>Hand Pong Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.4.0/lib/p5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.4.0/lib/addons/p5.sound.min.js"></script>
+ 
+
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            /* Horizontally centers */
+            align-items: center;
+            /* Vertically centers (optional) */
+            HEIGHT: 100vh;
+            /* Full viewport HEIGHT for vertical centering */
+            margin: 0;
+            /* Remove default margin */
+            background-color: black;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div id="canvasDiv"></div>
+    <script>
+        let video;
+        let detector;
+        let predictions = [];
+        let hits = [];
+
+        //Ball object with position, velocity, and size 
+        let ball = { x: 320, y: 240, vx: 10, vy: 3, radius: 15, timeout: 0 };
+        let scores = [0, 0]; // ''' Scores for player 1 and 2 '''
+
+        // Which hand (0 or 1) is holding the ball, or null if free.
+        let grabbedBy = null;
+
+        const connections = [
+            [0, 1], [0, 5], [0, 9], [0, 13], [0, 17],
+            [1, 2], [2, 3], [3, 4],
+            [5, 6], [6, 7], [7, 8],
+            [9, 10], [10, 11], [11, 12],
+            [13, 14], [14, 15], [15, 16],
+            [17, 18], [18, 19], [19, 20]
+        ];
+
+        const WIDTH = 1280
+        const HEIGHT = 800
+        let game_over = false
+
+        async function setup() {
+            let myCanvas = createCanvas(WIDTH, HEIGHT);
+            myCanvas.parent("canvasDiv")
+            video = createCapture(VIDEO);
+            video.size(WIDTH, HEIGHT);
+            video.hide();
+
+            await loadMediaPipeHands();
+            setInterval(detectHands, 50);
+        }
+
+        async function loadMediaPipeHands() {
+            const model = handPoseDetection.SupportedModels.MediaPipeHands;
+            const detectorConfig = {
+                runtime: 'tfjs',
+                modelType: 'full',
+                maxHands: 2
+            };
+            detector = await handPoseDetection.createDetector(model, detectorConfig);
+        }
+
+        async function detectHands() {
+            if (detector && video.elt.readyState === 4) {
+                const hands = await detector.estimateHands(video.elt, { flipHorizontal: false });
+                predictions = hands.map(hand => hand.keypoints.map(k => [k.x, k.y, k.z]));
+            }
+        }
+
+        //Draw and update the ball 
+        function drawBall() {
+            if (ball.timeout > 0) {
+                fill(255, 255, 255);
+            } else {
+                fill(0, 128, 128);
+            }
+            noStroke();
+            ellipse(ball.x, ball.y, ball.radius * 2);
+
+
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            //Bounce off top and bottom edges 
+            if (ball.y < ball.radius || ball.y > HEIGHT - ball.radius) {
+                ball.vy *= -1;
+            }
+
+            //Scoring conditions 
+            if (ball.x < 0) {
+                scores[1]++;
+                resetBall();
+            }
+            if (ball.x > WIDTH) {
+                scores[0]++;
+                resetBall();
+            }
+
+            //Collision with hands 
+
+        }
+
+        //Reset ball to center with random direction '''
+        function resetBall() {
+            ball.x = WIDTH / 2;
+            ball.y = Math.random() * HEIGHT;
+            ball.vx = (Math.random() > 0.5 ? 1 : -1) * 10;
+            ball.vy = (Math.random() - 0.5) * 6;
+        }
+
+        //Draw the scoreboard 
+        function drawScore() {
+            fill(255);
+            textSize(32);
+            text(`${scores[0]} : ${scores[1]}`, 625, 30);
+        }
+
+        function resetScore() {
+            scores = [0,0]
+            fill(255);
+            textSize(32);
+            text(`${scores[0]} : ${scores[1]}`, 625, 30);
+            
+        }
+
+        //Render hands with different colors 
+        function drawHands() {
+            for (let h = 0; h < predictions.length; h++) {
+                const keypoints = predictions[h];
+
+                stroke(h === 0 ? 'darkorange' : 'blue');
+                strokeWeight(2);
+                for (let c = 0; c < connections.length; c++) {
+                    const [startIdx, endIdx] = connections[c];
+                    const [x1, y1] = keypoints[startIdx];
+                    const [x2, y2] = keypoints[endIdx];
+                    line(x1, y1, x2, y2);
+                }
+
+                fill(h === 0 ? 'darkorange' : 'blue');
+                noStroke();
+                for (let j = 0; j < keypoints.length; j++) {
+                    const [x, y] = keypoints[j];
+                    ellipse(x, y, 8, 8);
+                }
+            }
+        }
+
+        function distance(a, b) {
+            return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+        }
+
+
+        function grabBall(keypoints) {
+            const indexDist = distance(keypoints[8], keypoints[5]);
+            const middleDist = distance(keypoints[12], keypoints[9]);
+            const ringDist = distance(keypoints[16], keypoints[13]);
+            const pinkDist = distance(keypoints[20], keypoints[17]);
+            let isClenched = (indexDist + middleDist + ringDist + pinkDist) < 100
+        }
+
+        function handHitsBall(landmarks, ball) {
+            for (let i = 0; i < landmarks.length; i++) {
+                let [x, y] = landmarks[i];
+
+                if (dist(x, y, ball.x, ball.y) < ball.radius * 2) {
+                    hits.push([x, y]);
+                    return true;
+                }
+            }
+        }
+
+        let img;
+        let bgMusic;
+
+        function preload() {
+            img = loadImage("coliseium.png");
+            bgMusic = loadSound("ping.mp3");
+        }
+
+        function mousePressed() {
+            userStartAudio();
+            if (!bgMusic.isPlaying()) {
+                bgMusic.setVolume(10);
+                bgMusic.loop();
+            }
+        }
+
+        function draw() {
+
+            push()
+            background(0);
+            scale(-1, 1);
+            translate(-WIDTH, 0);
+            image(img, 0, 0, WIDTH, HEIGHT);
+
+            if (!game_over) {
+
+                drawHands();
+
+                if (predictions && predictions.length > 0) {
+                    for (let h = 0; h < predictions.length; h++) {
+                        let keypoints = predictions[h];
+                        grabBall(keypoints);
+                    }
+                }
+
+
+                if (ball.timeout <= 0 && predictions.length) {
+                    for (let h = 0; h < predictions.length; h++) {
+                        if (handHitsBall(predictions[h], ball)) {
+                            console.log("Yeet");
+                            ball.vx *= -1;
+                            ball.vy = (Math.random() - 0.5) * 10;
+                            ball.timeout = 30
+                            break;
+                        }
+                    }
+                } else {
+                    ball.timeout -= 1
+                }
+                drawBall();
+
+                for (let hit of hits) {
+                    fill(255, 255, 0)
+                    circle(hit[0], hit[1], 10)
+                }
+
+                if (scores[0] == 10 || scores[1] == 10) {
+                    game_over = true;
+                }
+
+            } 
+
+            pop()
+
+            if (game_over) {
+
+                let winner = "?"
+
+                if (scores[0] > scores[1]) {
+                    winner = "Player 1"
+                }
+                else {
+                    winner = "Player 2"
+                }
+
+                fill(255);
+                textSize(64);
+                textAlign(CENTER, CENTER)
+                text(`GAME OVER ${winner} HAS WON`, width / 2, height - 450);
+
+                if (keyIsDown(27)) {
+                   game_over = false
+                   resetScore();    // your function to zero out scores[]
+                   resetBall();     // your function to put the ball back in play
+                }
+            } 
+
+            drawScore();
+            fill(255);
+            textSize(32);
+            text(`Player 1`, 100, 30);
+            
+            fill(255);
+            textSize(32);
+            text(`Player 2`, 1000, 30);
+
+            
+
+            
+
+        }
+    </script>
+
+</body>
+
+</html>
