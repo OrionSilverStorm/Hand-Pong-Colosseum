@@ -1,6 +1,8 @@
 🏛️ Hand Pong
 A webcam-controlled Pong game set in a coliseum. Your hands are the paddles, tracked in real time by machine learning running entirely in your browser. First to 10 points wins
 
+![Gameplay Footage](ExScreenshot.png)
+
 **Requirements:** 
 A webcam, an internet connection, a modern browser, and Python 3 (or Node.js).
 
